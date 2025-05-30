@@ -38,15 +38,18 @@ void telemetry_task(float m1Temp, float m2Temp, float m3Temp, float m4Temp, floa
 
 
 	char *json_string = cJSON_PrintUnformatted(root);
+    if (!json_string) return; // Check if JSON string creation was successful
 
-	std::uint8_t *buffer =reinterpret_cast<std::uint8_t *>(json_string);
-	std::uint32_t length = std::strlen(json_string);
+    std::size_t len = strlen(json_string);
+    std::unique_ptr<char[]> buf(new char[len + 2]);
 
+    std::memcpy(buf.get(), json_string, len);
+    buf[len] = '\n'; // Add newline character
+    buf[len + 1] = '\0'; // Null-terminate the string
 
-	serial.write(buffer, length); //sending the telemetry data over serial
-	cJSON_Delete(root);
-    std::free(json_string); //freeing the memory allocated for the JSON string
-}
+    serial.write(reinterpret_cast<std::uint8_t*>(buf.get()), len + 1); // Write the buffer to the serial port
+    cJSON_Delete(root); // Free the JSON object
+    cJSON_free(json_string); // Free the JSON string
 
 
 //building loop to send telemetry data at 200Hz
