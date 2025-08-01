@@ -1,5 +1,7 @@
-import asyncio, json, serial, time, socket
+import serial
+import time
 from gpiozero import DigitalOutputDevice
+from flask import Flask, Response, render_template_string
 
 """
 RS485 -> WiFi Bridge
@@ -17,49 +19,27 @@ ser485 = serial.Serial(UART_DEV, BAUD, timeout=0.02)
 
 dir_pin = DigitalOutputDevice(17, active_high=True, initial_value=False)
 
-#----- TCP Settings -----
+#----- Flask App -----
 
-HOST = '0.0.0.0'
-PORT = 9000
-clients = set()
+app = Flask(__name__)
 
-#----- server ------
-
-async def brain_reader():
+def brain_reader():
+    """Reads data from the serial port and yields it for SSE."""
     buf = bytearray()
     while True:
-        buf.extend(ser485.read(1024)) #2ms read
+        buf.extend(ser485.read(1024))
         while b"\n" in buf:
-            pkt,_, buf = buf.partition(b"\n")
-            dead = []
-            for c in clients:
-                try:
-                    c.sendall(pkt + b"\n") # send packet to all clients with flag
-                except OSError:
-                    dead.append(c)
-            for c in dead:
-                clients.discard(c) 
-        await asyncio.sleep(0)
+            pkt, _, buf = buf.partition(b"\n")
+            yield f"data: {pkt.decode('utf-8')}\n\n"
+        time.sleep(0.001) # Small delay to prevent busy-waiting
 
-async def tcp_server():
-    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    srv.bind((HOST, PORT))
-    srv.listen()
-    srv.setblocking(False)
-    print(f"[INFO] listening on {HOST}:{PORT}")
-    loop = asyncio.get_running_loop()
-    while True:
-        client, addr = await loop.run_in_executor(None, srv.accept)
-        client.setblocking(False)
-        clients.add(client)
-        print(f"[INFO] client connected: {addr}")
-
-async def main():
-    await asyncio.gather(brain_reader(), tcp_server())
+@app.route('/')
+def stream():
+    """SSE endpoint to stream data from the brain."""
+    return Response(brain_reader(), mimetype='text/event-stream')
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        app.run(host='0.0.0.0', port=9000, threaded=True)
     except KeyboardInterrupt:
         print("bye")
