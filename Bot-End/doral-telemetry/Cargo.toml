@@ -1,0 +1,8 @@
+[package]
+name = "doral-telemetry"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+cobs = { version = "0.4.0", default-features = false }
+heapless = "0.8.0"
