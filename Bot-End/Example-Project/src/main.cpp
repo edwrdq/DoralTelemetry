@@ -1,6 +1,11 @@
 #include "main.h"
-#include "telemetry.hpp"
-#include "autonSelector.hpp"
+#include "doraltelemetry/telemetry.hpp"
+
+// Define drivetrain and sensors here (global scope)
+// Adjust port numbers and inversion to match your wiring.
+pros::MotorGroup left_motors({1, 2, 3});    // TODO: set correct ports, negative for reversed
+pros::MotorGroup right_motors({4, 5, 6});   // TODO: set correct ports, negative for reversed
+pros::Imu imu(7);                           // TODO: set correct IMU port
 
 //-----Other definitions found in autonSelector.cpp, telemetry.cpp, and global.cpp-------------------
 
@@ -14,6 +19,10 @@
 void initialize() {
 	pros::lcd::initialize();
 	pros::lcd::set_text(1, "Hello PROS User!");
+    // Initialize telemetry on configured UART
+    doraltelemetry::init(&serial);
+    // Start fake stream by default for testing
+    doraltelemetry::start_fake_task(4);
 }
 
 /**
