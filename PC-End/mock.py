@@ -3,9 +3,9 @@ import time
 import random
 import json
 from flask import Flask, Response
-
+from flask_cors import CORS
 app = Flask(__name__)
-
+CORS(app)
 def crc16_ccitt(data: bytes, init: int = 0xFFFF) -> int:
     crc = init
     for b in data:
