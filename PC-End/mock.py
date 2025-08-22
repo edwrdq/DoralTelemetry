@@ -2,6 +2,7 @@ import struct
 import time
 import random
 import json
+import math
 from flask import Flask, Response
 from flask_cors import CORS
 app = Flask(__name__)
@@ -34,15 +35,124 @@ def cobs_decode(src: bytes) -> bytes:
             out.append(0)
     return bytes(out)
 
+# --- Robot state for realistic movement ---
+class RobotSim:
+    def __init__(self):
+        self.x = random.uniform(-36, 36)
+        self.y = random.uniform(-36, 36)
+        self.theta = random.uniform(0, 360)  # CW positive, 0 = y-up
+        self.v = 0.0         # Forward velocity (inches/sec)
+        self.omega = 0.0     # Rotational velocity (deg/sec)
+        self.last_update = time.time()
+        self.battery = random.uniform(80, 100)
+        self.motor_count = 4
+        self.temps = [random.uniform(30, 55) for _ in range(self.motor_count)]
+        self.rpm = [random.uniform(0, 600) for _ in range(self.motor_count)]
+        self.volts = [random.uniform(11, 13) for _ in range(self.motor_count)]
+        # Waypoint navigation
+        self.waypoint = self._random_waypoint()
+        self.reached_threshold = 2.0  # inches
+        self.max_speed = 3.0  # inches/sec
+        self.max_turn = 90.0  # deg/sec
+
+    def _random_waypoint(self):
+        # Field is 144x144, clamp to [-60, 60] for margin
+        return (random.uniform(-60, 60), random.uniform(-60, 60))
+
+    def step(self, dt):
+        # Make simulation 10x faster
+        dt = dt * 10
+
+        # Check if we've reached the current waypoint
+        dx = self.waypoint[0] - self.x
+        dy = self.waypoint[1] - self.y
+        distance_to_waypoint = (dx**2 + dy**2)**0.5
+
+        if distance_to_waypoint < self.reached_threshold:
+            # Pick a new waypoint
+            self.waypoint = self._random_waypoint()
+            dx = self.waypoint[0] - self.x
+            dy = self.waypoint[1] - self.y
+            distance_to_waypoint = (dx**2 + dy**2)**0.5
+
+        # Calculate desired heading to waypoint (CW positive, 0 = y-up)
+        desired_theta = math.degrees(math.atan2(dx, dy))
+        desired_theta = desired_theta % 360
+
+        # Calculate heading error
+        heading_error = desired_theta - self.theta
+        # Normalize to [-180, 180]
+        while heading_error > 180:
+            heading_error -= 360
+        while heading_error < -180:
+            heading_error += 360
+
+        # Set rotational velocity to steer toward waypoint
+        self.omega = max(min(heading_error * 2.0, self.max_turn), -self.max_turn)
+
+        # Set forward velocity based on distance to waypoint
+        self.v = min(distance_to_waypoint * 0.5, self.max_speed)
+
+        # Integrate velocity to position and heading (CW positive, 0 = y-up)
+        theta_rad = math.radians(self.theta)
+        self.x += self.v * dt * math.sin(theta_rad)
+        self.y += self.v * dt * math.cos(theta_rad)
+        self.theta += self.omega * dt
+
+        # Clamp position to |x|,|y| < 60
+        self.x = max(min(self.x, 60), -60)
+        self.y = max(min(self.y, 60), -60)
+
+        # Wrap theta to [0, 360)
+        self.theta = self.theta % 360
+
+        # Simulate battery drain
+        self.battery -= 0.005 * (abs(self.v) + abs(self.omega)) * dt
+        self.battery = max(self.battery, 0)
+
+        # Simulate motor temps, rpm, volts
+        for i in range(self.motor_count):
+            # Temp rises with velocity, cools otherwise
+            self.temps[i] += (0.01 * abs(self.v) - 0.005 * (self.temps[i] - 30)) * dt
+            self.temps[i] = max(min(self.temps[i], 70), 25)
+            # RPM proportional to velocity + noise
+            self.rpm[i] = abs(self.v) * 100 + random.random() * 10
+            # Voltage drops slightly with load
+            self.volts[i] = 12.5 - 0.01 * abs(self.rpm[i]) + random.uniform(-0.05, 0.05)
+            self.volts[i] = max(11, min(self.volts[i], 13))
+
+    def get_state(self):
+        return {
+            "version": 1,
+            "motorCount": self.motor_count,
+            "battery": self.battery,
+            "x": self.x,
+            "y": self.y,
+            "theta": -self.theta,
+            "motorTemperature": self.temps[:],
+            "motorRpm": self.rpm[:],
+            "motorVoltage": self.volts[:],
+            "ts": time.time()
+        }
+
+robot_sim = RobotSim()
+
 def make_payload(motor_count=4):
-    version = 1
-    battery = random.uniform(80, 100)
-    x = random.uniform(0, 144)
-    y = random.uniform(0, 144)
-    theta = random.uniform(0, 360)
-    temps = [random.uniform(30, 55) for _ in range(motor_count)]
-    rpm = [random.uniform(0, 600) for _ in range(motor_count)]
-    volts = [random.uniform(11, 13) for _ in range(motor_count)]
+    # Use robot_sim for realistic movement
+    now = time.time()
+    dt = now - robot_sim.last_update
+    dt = max(min(dt, 0.1), 0.001)
+    robot_sim.step(dt)
+    robot_sim.last_update = now
+    state = robot_sim.get_state()
+    version = state["version"]
+    battery = state["battery"]
+    x = state["x"]
+    y = state["y"]
+    theta = state["theta"]
+    temps = state["motorTemperature"]
+    rpm = state["motorRpm"]
+    volts = state["motorVoltage"]
     payload = struct.pack('<BBffff', version, motor_count, battery, x, y, theta)
     for arr in (temps, rpm, volts):
         payload += struct.pack('<' + 'f'*motor_count, *arr)
@@ -89,9 +199,7 @@ def parse_payload(payload: bytes):
         'ts': time.time()
     }
 
-import json
-
-def telemetry_generator(motor_count=4, hz=200):
+def telemetry_generator(motor_count, hz):
     while True:
         payload = make_payload(motor_count)
         pkt = parse_payload(payload)
@@ -112,7 +220,7 @@ if __name__ == "__main__":
     ap.add_argument('--host', default='0.0.0.0')
     ap.add_argument('--port', type=int, default=34453)
     ap.add_argument('--motors', type=int, default=4)
-    ap.add_argument('--hz', type=int, default=200)
+    ap.add_argument('--hz', type=int, default=100)
     args = ap.parse_args()
     print(f"Mock RPi SSE server listening on http://{args.host}:{args.port}/stream (motors={args.motors}, {args.hz}Hz)")
     app.run(host=args.host, port=args.port, threaded=True)
