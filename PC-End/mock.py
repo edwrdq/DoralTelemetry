@@ -1,30 +1,10 @@
-# Requirements:
-#   uv pip install pyserial gpiozero flask
-
-import serial
 import struct
 import time
+import random
 import json
-from gpiozero import DigitalOutputDevice
 from flask import Flask, Response
-import threading
 
-"""
-RS485 -> TCP Bridge
--------------------
-GPIO 14(TX) -> MAX485 DI
-GPIO 15(RX) -> MAX485 RO
-GPIO 17 -> MAX485 DE/RE (low for receive, high for transmit)
-
-Now decodes COBS+CRC16 frames from UART, parses payload, and sends JSON lines (newline-delimited) via TCP SSE.
-"""
-
-#----- RS-485 (UART) Configuration -----
-UART_DEV = '/dev/serial0'  # UART device
-BAUD = 512_000
-ser485 = serial.Serial(UART_DEV, BAUD, timeout=0.02)
-
-dir_pin = DigitalOutputDevice(17, active_high=True, initial_value=False)
+app = Flask(__name__)
 
 def crc16_ccitt(data: bytes, init: int = 0xFFFF) -> int:
     crc = init
@@ -53,6 +33,22 @@ def cobs_decode(src: bytes) -> bytes:
         if code < 0xFF and idx < len(src):
             out.append(0)
     return bytes(out)
+
+def make_payload(motor_count=4):
+    version = 1
+    battery = random.uniform(80, 100)
+    x = random.uniform(0, 144)
+    y = random.uniform(0, 144)
+    theta = random.uniform(0, 360)
+    temps = [random.uniform(30, 55) for _ in range(motor_count)]
+    rpm = [random.uniform(0, 600) for _ in range(motor_count)]
+    volts = [random.uniform(11, 13) for _ in range(motor_count)]
+    payload = struct.pack('<BBffff', version, motor_count, battery, x, y, theta)
+    for arr in (temps, rpm, volts):
+        payload += struct.pack('<' + 'f'*motor_count, *arr)
+    crc = crc16_ccitt(payload)
+    payload += struct.pack('<H', crc)
+    return payload
 
 def parse_payload(payload: bytes):
     # payload = [data ...][crc_lo][crc_hi]
@@ -93,41 +89,30 @@ def parse_payload(payload: bytes):
         'ts': time.time()
     }
 
-# Flask SSE server
-app = Flask(__name__)
+import json
 
-def uart_stream():
-    buf = bytearray()
+def telemetry_generator(motor_count=4, hz=200):
     while True:
-        data = ser485.read(1024)
-        if not data:
-            time.sleep(0.005)
-            continue
-        buf.extend(data)
-        while True:
-            try:
-                z = buf.index(0)
-            except ValueError:
-                break
-            frame = bytes(buf[:z])
-            del buf[:z+1]
-            if not frame:
-                continue
-            decoded = cobs_decode(frame)
-            if not decoded:
-                continue
-            pkt = parse_payload(decoded)
-            if pkt:
-                yield f"data: {json.dumps(pkt)}\n\n"
+        payload = make_payload(motor_count)
+        pkt = parse_payload(payload)
+        if pkt:
+            yield f"data: {json.dumps(pkt)}\n\n"
+        time.sleep(1.0 / hz)
 
 @app.route("/stream")
 def stream():
-    return Response(uart_stream(), mimetype="text/event-stream")
-
-@app.route("/")
-def index():
-    return "<h1>VEX Telemetry Pi Bridge</h1><p>Visit <code>/stream</code> for SSE JSON.</p>"
+    from flask import request
+    motors = int(request.args.get("motors", 4))
+    hz = int(request.args.get("hz", 200))
+    return Response(telemetry_generator(motors, hz), mimetype="text/event-stream")
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=34453, threaded=True)
-
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--host', default='0.0.0.0')
+    ap.add_argument('--port', type=int, default=34453)
+    ap.add_argument('--motors', type=int, default=4)
+    ap.add_argument('--hz', type=int, default=200)
+    args = ap.parse_args()
+    print(f"Mock RPi SSE server listening on http://{args.host}:{args.port}/stream (motors={args.motors}, {args.hz}Hz)")
+    app.run(host=args.host, port=args.port, threaded=True)
