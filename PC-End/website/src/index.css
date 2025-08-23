@@ -1,0 +1,7 @@
+@import "react-mosaic-component/react-mosaic-component.css";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+@keyframes spin {
+  100% { transform: rotate(360deg); }
+}
