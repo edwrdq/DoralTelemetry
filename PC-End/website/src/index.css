@@ -87,3 +87,9 @@ html, body, #root {
 .mosaic-blueprint-theme .mosaic-tile {
   border: 1px solid var(--topbar-border) !important;
 }
+
+/* Accessible focus outlines tuned for dark/light themes */
+:where(button, a, [role="button"], input, select, textarea):focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

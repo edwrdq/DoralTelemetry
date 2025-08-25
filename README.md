@@ -1,46 +1,96 @@
-# VEX Telemetry Suite
+# DoralTelemetry — End‑to‑End Telemetry (Bot, Pi, Proxy, Website)
 
-Modular telemetry for VEX V5 robots using PROS (bot), a Raspberry Pi RS‑485 bridge, and a Wi‑Fi client UI. The design is receive‑only: the robot streams JSON lines over UART; the Pi relays them via HTTP Server‑Sent Events (SSE) and serves a Gruvbox‑dark web client.
+Modular telemetry stack for VEX V5 robots: a C++ PROS library on the robot, a Raspberry Pi RS‑485→TCP bridge, a PC‑side SSE proxy, and a React website with theme support.
 
-[KanBan + Docs](https://www.notion.so/Doral-Telemetry-Features-Kanban-1fb83b8a79dd807db376e0dae9aa1ce0)
+[Kanban + Docs](https://www.notion.so/Doral-Telemetry-Features-Kanban-1fb83b8a79dd807db376e0dae9aa1ce0)
 
-## Core Features
-- Real-time telemetry from the VEX brain via RS‑485 → Raspberry Pi.
-- Bot → Pi uses COBS + CRC16 binary frames (200 Hz target).
-- PC Python app starts a local Gruvbox UI and proxies data as JSON.
-- Simple bot API: user calls a function with motor arrays + pose + battery.
+## Architecture
+- Bot-End (VEX/PROS): Publishes COBS+CRC16 framed telemetry over UART/RS‑485, 0x00‑delimited.
+- Pi-End (`wifiBridge.py`): Receives UART bytes and forwards raw frames over TCP (`0.0.0.0:34453`).
+- PC-End:
+  - `pc_proxy.py`: Connects to the Pi TCP stream, COBS+CRC16 validates, parses payload, serves JSON via SSE at `/stream`.
+  - `website/`: React + Vite + Tailwind app that consumes SSE and renders live telemetry with selectable themes.
 
-## Repo Layout
-- `Bot-End/Example-Project/`: PROS project (C++), UART JSON telemetry.
-- `Pi-End/`: Python RS‑485 → SSE bridge + web client.
+## Project Structure
+- `Bot-End/Example-Project/`: PROS C++ library and example entry point.
+  - Public API: `include/doraltelemetry/` (COBS + CRC16 telemetry).
+  - Sources: `src/doraltelemetry/` and example `src/main.cpp`, `src/global.cpp`.
+- `Pi-End/`: Raspberry Pi RS‑485 → TCP bridge (`wifiBridge.py`).
+- `PC-End/`: Local SSE proxy (`pc_proxy.py`) + Website (`website/`).
 
-## Bot Library (PROS Depot)
-- Library name: `doraltelemetry` (this project builds a library archive).
-- Public header: `include/doraltelemetry/telemetry.hpp`.
-- API:
-  - `void doraltelemetry::init(pros::Serial* uart);`
-  - `void doraltelemetry::submit(const float* temps, const float* rpm, const float* volt, int motorCount, float x, float y, float theta, float battery);`
+## Bot Library (C++ / PROS)
+- Namespace `doraltelemetry`; C++20.
+- Public API (see `include/doraltelemetry/telemetry.hpp`):
+  - `void init(pros::Serial* uart);`
+  - `void submit(const float* temps, const float* rpm, const float* volt, int motorCount, float x, float y, float theta, float battery);`
   - Optional: `start_fake_task(motorCount=4)`, `stop_task()`.
-- Supported motors: pass `motorCount` (e.g., 4 or 6). Unused arrays can be null; extra values ignored.
-- Packet format: `[ver=1][motorCount][battery,x,y,theta][temps[m]][rpm[m]][volt[m]][crc16]` COBS-framed with `0x00` delimiter.
+- Payload layout (little‑endian), framed with COBS + `0x00`, CRC16‑CCITT appended:
+  - `[u8 version=1][u8 motorCount][f32 battery][f32 x][f32 y][f32 theta][f32 temps[m]][f32 rpm[m]][f32 volt[m]][u16 crc16]`.
 
-## Pi Setup (RS‑485 → TCP)
-1. Wire RS‑485 transceiver (MAX485) to Pi:
-   - TX: GPIO 14 → DI, RX: GPIO 15 → RO
-   - DE/RE: GPIO 17 (low = receive)
-2. Enable UART on the Pi (disable serial console; keep serial hardware enabled).
-3. Run `python3 Pi-End/wifiBridge.py` to start TCP server at `0.0.0.0:34453`.
-   - The server forwards raw COBS-framed bytes from `/dev/serial0`.
+### Build (Library Archive)
+- `cd Bot-End/Example-Project && make library`
+- Outputs `bin/doraltelemetry.a` for PROS Depot usage.
 
-## PC UI (Local Gruvbox)
-- Start: `python3 PC-End/telemetry_ui.py` (defaults: UI at `http://127.0.0.1:9000`, Pi at `10.0.0.1:34453`).
-- The Python app connects to the Pi TCP stream, validates COBS+CRC, converts to JSON, and serves SSE at `/stream` + a minimal Gruvbox UI at `/`.
-- Flags: `--pi-host`, `--pi-port`, `--host`, `--port`.
-- Simulate (no Pi needed): add `--simulate` (optional: `--sim-motors 6 --sim-hz 200`).
+## Raspberry Pi Bridge (RS‑485 → TCP)
+- Wiring: TX GPIO14 → DI, RX GPIO15 → RO, DE/RE GPIO17 (held low = receive‑only).
+- Enable UART on Pi (disable serial console, enable serial hardware).
+- Install deps (Pi): `pip3 install pyserial gpiozero`
+- Run (UART mode): `python3 Pi-End/wifiBridge.py` (listens on `0.0.0.0:34453`).
+  - Forwards raw UART bytes (COBS+CRC16 frames, `0x00` delimited) to TCP clients.
 
-## Notes
-- Receive-only design; RS‑485 direction pin held low (listen).
-- Library is bot-only; PC UI is separate from PROS depot packaging.
+### Pi Mock Mode (no robot required)
+- Generate realistic COBS+CRC16 frames directly from the Pi:
+  - `python3 Pi-End/wifiBridge.py --mock --motors 4 --hz 100`
+- Flags:
+  - `--motors`: number of motors in arrays (default 4)
+  - `--hz`: publish rate for frames (default 100)
+  - `--host`, `--port`: TCP listen address/port (defaults `0.0.0.0:34453`)
+  - UART flags (ignored in mock): `--uart`, `--baud`
+
+## PC Proxy (SSE)
+- Deps (PC): `pip3 install Flask flask-cors`
+- Run: `python3 PC-End/pc_proxy.py --pi-host 10.0.0.1 --pi-port 34453 --host 127.0.0.1 --port 9000`
+  - Exposes SSE at `http://127.0.0.1:9000/stream`.
+  - Quick check: `curl -N http://127.0.0.1:9000/stream` (should stream `data: { ... }`).
+
+## Website (React + Vite + Tailwind)
+- Requires Bun or Node; repo uses Bun lockfile.
+- Install: `cd PC-End/website && bun install`
+- Dev: `VITE_SSE_URL=http://127.0.0.1:9000/stream bun run dev`
+- Open the printed local URL (typically `http://127.0.0.1:5173/`).
+
+### Themes
+- Options: Default, Blue Accents, Gruvbox Dark, Gruvbox Light.
+- Persisted in `localStorage`; toggle via the settings button in the UI.
+
+## End‑to‑End Test
+1) Start the Pi bridge: `python3 Pi-End/wifiBridge.py`
+2) Start the PC proxy: `python3 PC-End/pc_proxy.py --pi-host 10.0.0.1 --pi-port 34453`
+3) In another terminal, start the website:
+   - `cd PC-End/website && bun install`
+   - `VITE_SSE_URL=http://127.0.0.1:9000/stream bun run dev`
+4) Open the website and verify live updates (battery, motors, position).
+
+Tip: Without hardware, use the mock SSE server instead of the proxy:
+- `python3 PC-End/mock.py` then `VITE_SSE_URL=http://127.0.0.1:34453/stream bun run dev`.
+
+Or, mock at the Pi layer and keep using the proxy and website as‑is:
+- On Pi: `python3 Pi-End/wifiBridge.py --mock --motors 4 --hz 100`
+- On PC: `python3 PC-End/pc_proxy.py --pi-host 10.0.0.1 --pi-port 34453`
+
+## Coding Style
+- C++: Namespace `doraltelemetry`, headers under `include/doraltelemetry/`, 4‑space indents.
+- Python: 4‑space indents; focused modules and functions.
+
+## Security & Defaults
+- Receive‑only Pi (DE/RE low); no secrets in repo.
+- Default UART: `/dev/serial0 @ 512000` baud. Default TCP: `10.0.0.1:34453`.
+- If exposing the UI beyond localhost, add HTTPS and auth at the proxy layer.
+
+## Conventional Commits
+- Format: `type(scope): summary` (e.g., `feat(bot): add submit() payload layout`).
+- Types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`.
+- Breaking changes: `feat!: ...` or footer `BREAKING CHANGE: ...`.
 
 ## License
 MIT
