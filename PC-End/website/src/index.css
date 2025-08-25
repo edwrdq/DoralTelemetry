@@ -5,3 +5,85 @@
 @keyframes spin {
   100% { transform: rotate(360deg); }
 }
+
+/* Theme variables */
+:root,
+.theme-default {
+  --app-bg: #f8fafc; /* slate-50 */
+  --topbar-bg: #fafbfc;
+  --topbar-border: #eeeeee;
+  --card-bg: #ffffff;
+  --text-primary: #0f172a; /* slate-900 */
+  --accent: #3b82f6; /* blue-500 */
+  --settings-icon: #111111; /* default: black icon */
+}
+
+.theme-blue {
+  --app-bg: #eef4ff; /* light blue wash */
+  --topbar-bg: #e6f0ff;
+  --topbar-border: #cddafe;
+  --card-bg: #ffffff;
+  --text-primary: #0b1a33;
+  --accent: #2563eb; /* blue-600 */
+  --settings-icon: var(--accent);
+}
+
+.theme-gruvbox-dark {
+  --app-bg: #282828;
+  --topbar-bg: #3c3836;
+  --topbar-border: #504945;
+  --card-bg: #3c3836;
+  --text-primary: #ebdbb2;
+  --accent: #83a598;
+  --settings-icon: var(--accent);
+}
+
+.theme-gruvbox-light {
+  --app-bg: #fbf1c7;
+  --topbar-bg: #f2e5bc;
+  --topbar-border: #d5c4a1;
+  --card-bg: #f2e5bc;
+  --text-primary: #3c3836;
+  --accent: #076678;
+  --settings-icon: var(--accent);
+}
+
+/* Ensure base text/background inherit theme */
+html, body, #root {
+  background: var(--app-bg);
+  color: var(--text-primary);
+}
+
+/* Override react-mosaic default whites to honor theme */
+.mosaic-blueprint-theme .mosaic-window,
+.mosaic-blueprint-theme .mosaic-window-body,
+.mosaic-blueprint-theme .mosaic-window-toolbar,
+.mosaic-blueprint-theme .mosaic-root {
+  background: var(--card-bg) !important;
+  color: var(--text-primary) !important;
+}
+.mosaic-blueprint-theme .mosaic-window {
+  border: 1px solid var(--topbar-border) !important;
+  box-shadow: none !important;
+}
+.mosaic-blueprint-theme .mosaic-window-title {
+  background: transparent !important;
+  color: var(--text-primary) !important;
+  border-bottom: 1px solid var(--topbar-border) !important;
+}
+.mosaic-blueprint-theme .mosaic-split {
+  background: var(--topbar-border) !important;
+}
+.mosaic-blueprint-theme .mosaic-split:hover {
+  background: var(--accent) !important;
+}
+.mosaic-blueprint-theme .mosaic-preview,
+.mosaic-blueprint-theme .mosaic-drop-target,
+.mosaic-blueprint-theme .drop-target-container {
+  background: var(--topbar-bg) !important;
+}
+
+/* Tile container outline */
+.mosaic-blueprint-theme .mosaic-tile {
+  border: 1px solid var(--topbar-border) !important;
+}

@@ -72,7 +72,11 @@ export const MosaicView: React.FC<MosaicViewProps> = ({ children: childrenReal }
   // Settings panel: toggles for each child
   const SettingsPanel = (
     <div
-      className="flex items-center gap-6 border-b border-[#eee] bg-[#fafbfc] p-2 h-[5%]"
+      className="flex items-center gap-6 p-2 h-[5%]"
+      style={{
+        backgroundColor: "var(--topbar-bg)",
+        borderBottom: "1px solid var(--topbar-border)",
+      }}
     >
       {allKeys.map((key) => (
         <label key={key} style={{ display: "flex", alignItems: "center" }}>
@@ -97,7 +101,7 @@ export const MosaicView: React.FC<MosaicViewProps> = ({ children: childrenReal }
   );
 
   return (
-    <div className="w-screen h-screen">
+    <div className="w-screen h-screen" style={{ background: "var(--app-bg)", color: "var(--text-primary)" }}>
       {SettingsPanel}
       <div className="w-full h-[95%]">
         <Mosaic<string>

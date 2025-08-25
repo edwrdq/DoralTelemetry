@@ -117,9 +117,9 @@ class RobotSim:
             self.temps[i] = max(min(self.temps[i], 70), 25)
             # RPM proportional to velocity + noise
             self.rpm[i] = abs(self.v) * 100 + random.random() * 10
-            # Voltage drops slightly with load
+            # Voltage drops slightly with load, cap at 12.7V
             self.volts[i] = 12.5 - 0.01 * abs(self.rpm[i]) + random.uniform(-0.05, 0.05)
-            self.volts[i] = max(11, min(self.volts[i], 13))
+            self.volts[i] = max(11, min(self.volts[i], 12.7))
 
     def get_state(self):
         return {
